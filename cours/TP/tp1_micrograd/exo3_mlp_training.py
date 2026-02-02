@@ -37,7 +37,13 @@ from micrograd.nn import MLP
 
 
 def hinge_loss(y, y_preds):
-    return []
+    losses = []
+    for yi, y_pred in zip(y, y_preds):
+        # Loss_i = max(0, 1 - y_i * y_pred_i)
+        # Réécrit comme: 1 + (-yi * y_pred) pour éviter int - Value
+        loss_i = ((-yi) * y_pred + 1).relu()
+        losses.append(loss_i)
+    return losses
 
 
 # =============================================================================

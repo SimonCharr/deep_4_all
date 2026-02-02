@@ -42,13 +42,21 @@ Pour installer pytorch GPU
 uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
 ````
 
-ou défaut CPU pour mac ou si vous avez que un processeur Intel pas de GPU
+ou défaut CPU
 
 ````bash
 uv pip install torch torchvision
 ````
 
-## Utilisation pour les Cours
+## Utilisation
+
+Activer l'environnement et lancer Jupyter Lab :
+
+```bash
+uv run jupyter lab
+```
+
+Ou lancer Marimo :
 
 ```bash
 uv run marimo edit

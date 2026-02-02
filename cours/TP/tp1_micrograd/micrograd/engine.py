@@ -33,8 +33,8 @@ class Value:
             derivee_locale_other = 1.0  # dz/dy
 
             # Application de la Chain Rule
-            self.grad = grad_externe * derivee_locale_self
-            other.grad = grad_externe * derivee_locale_other
+            self.grad += grad_externe * derivee_locale_self
+            other.grad += grad_externe * derivee_locale_other
 
         out._backward = _backward
         return out
@@ -55,8 +55,8 @@ class Value:
 
             grad_externe = out.grad  # dL/dz
 
-            derivee_locale_self = self.data  # dz/dx = y
-            derivee_locale_other =  other.data # dz/dy = x
+            derivee_locale_self = other.data  # dz/dx = y
+            derivee_locale_other =  self.data # dz/dy = x
 
             # Application de la Chain Rule
             self.grad += grad_externe * derivee_locale_self
