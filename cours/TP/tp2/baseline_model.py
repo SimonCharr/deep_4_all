@@ -20,32 +20,27 @@ import torch.nn as nn
 
 class GuildOracle(nn.Module):
     """
-    Modèle baseline pour prédire la survie des aventuriers.
-
-    Architecture : MLP profond (trop profond !)
+    Modèle pour prédire la survie des aventuriers.
     """
 
-    def __init__(self, input_dim: int = 8, hidden_dim: int = 256, num_layers: int = 5):
+    def __init__(self, input_dim: int = 8, hidden_dim: int = 6, dropout: float = 0.5):
         """
         Args:
             input_dim: Nombre de features (8 stats)
             hidden_dim: Dimension des couches cachées
-            num_layers: Nombre de couches cachées
+            dropout: Taux de dropout pour régularisation
         """
         super().__init__()
-        # TODO
-        self.network = nn.Sequential()
+        # Architecture simple avec dropout
+        self.network = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, 1)
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass.
-
-        Args:
-            x: Tensor de shape (batch_size, input_dim)
-
-        Returns:
-            Logits de shape (batch_size, 1)
-        """
+        """Forward pass."""
         return self.network(x)
 
     def predict_proba(self, x: torch.Tensor) -> torch.Tensor:

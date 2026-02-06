@@ -1,3 +1,6 @@
+import math
+
+
 class Value:
     """
     Noeud du graphe de calcul.
@@ -104,6 +107,28 @@ class Value:
 
             # Indicateur : 1 si actif, 0 si inactif
             derivee_locale = 1.0 if out.data > 0 else 0.0
+
+            self.grad += grad_externe * derivee_locale
+
+        out._backward = _backward
+        return out
+
+    # ==========================================================================
+    # 5. ACTIVATION Sigmoid : z = 1 / (1 + e^(-x))
+    # ==========================================================================
+    def sigmoid(self):
+        # Forward : sigmoid(x) = 1 / (1 + e^(-x))
+        sig = 1.0 / (1.0 + math.exp(-self.data))
+        out = Value(sig, (self,), 'sigmoid')
+
+        def _backward():
+            # --- MATHÉMATIQUES ---
+            # d(sigmoid)/dx = sigmoid(x) * (1 - sigmoid(x))
+
+            grad_externe = out.grad
+
+            # Derivee : sig * (1 - sig)
+            derivee_locale = out.data * (1.0 - out.data)
 
             self.grad += grad_externe * derivee_locale
 

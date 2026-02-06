@@ -33,13 +33,18 @@ from baseline_model import GuildOracle, count_parameters
 class AdventurerDataset(Dataset):
     """Dataset des aventuriers de la Guilde."""
 
-    def __init__(self, csv_path: str, normalize: bool = False):
+    def __init__(self, csv_path: str, normalize: bool = False, augment: bool = False, noise_std: float = 0.1):
         """
         Args:
             csv_path: Chemin vers le fichier CSV
             normalize: Si True, normalise les features (recommandé mais désactivé par défaut)
+            augment: Si True, ajoute du bruit aux features pendant l'entraînement
+            noise_std: Écart-type du bruit gaussien
         """
         self.df = pd.read_csv(csv_path)
+        self.augment = augment
+        self.noise_std = noise_std
+        self.training_mode = False
 
         # Séparer features et labels
         self.labels = torch.tensor(self.df['survie'].values, dtype=torch.float32)
@@ -57,7 +62,25 @@ class AdventurerDataset(Dataset):
         return len(self.labels)
 
     def __getitem__(self, idx):
-        return self.features[idx], self.labels[idx]
+        features = self.features[idx].clone()
+        if self.augment and self.training_mode:
+            # Bruit gaussien avec PLUS de bruit sur force (idx 0) et expérience (idx 4)
+            noise = torch.randn_like(features) * self.noise_std
+            # Features: force(0), intel(1), agil(2), chance(3), exp(4), niveau(5), equip(6), fatigue(7)
+            # TM: intel(30%), agil(20%), chance(20%), equip(15%), force<70(10%), exp(5%)
+            # Force>70 = -15% PENALITE!
+            noise[0] *= 30.0  # Force - COMPLETEMENT IGNORER
+            noise[4] *= 8.0   # Experience - quasi ignorer
+            noise[6] *= 3.0   # Equipement - un peu de bruit
+            # PRESERVER: intel, agil, chance
+            noise[1] *= 0.1   # Intelligence - TRES IMPORTANT
+            noise[2] *= 0.1   # Agilité - TRES IMPORTANT
+            noise[3] *= 0.1   # Chance - TRES IMPORTANT
+            features = features + noise
+        return features, self.labels[idx]
+
+    def set_training_mode(self, mode: bool):
+        self.training_mode = mode
 
 
 # ============================================================================
@@ -132,12 +155,17 @@ def main(args):
     print("\nChargement des données...")
     train_dataset = AdventurerDataset(
             str(data_dir / "train.csv"),
-            normalize=args.normalize
+            normalize=args.normalize,
+            augment=args.augment,
+            noise_std=args.noise_std
             )
+    train_dataset.set_training_mode(True)
     val_dataset = AdventurerDataset(
             str(data_dir / "val.csv"),
-            normalize=args.normalize
+            normalize=args.normalize,
+            augment=False
             )
+    val_dataset.set_training_mode(False)
 
     # DataLoaders
     train_loader = DataLoader(
@@ -158,7 +186,8 @@ def main(args):
     print("\nCréation du modèle...")
     model = GuildOracle(
             input_dim=train_dataset.features.shape[1],
-            hidden_dim=args.hidden_dim
+            hidden_dim=args.hidden_dim,
+            dropout=args.dropout
             )
     model = model.to(device)
     print(f"Paramètres: {count_parameters(model):,}")
@@ -181,6 +210,11 @@ def main(args):
                 )
 
     print(f"Optimiseur: {args.optimizer.upper()}, LR: {args.learning_rate}")
+
+    # Learning rate scheduler
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='max', factor=0.5, patience=5
+            )
 
     # Historique
     history = {
@@ -210,6 +244,9 @@ def main(args):
         history['train_acc'].append(train_acc)
         history['val_loss'].append(val_loss)
         history['val_acc'].append(val_acc)
+
+        # Update scheduler
+        scheduler.step(val_acc)
 
         # Affichage
         print(
@@ -294,11 +331,23 @@ if __name__ == "__main__":
             '--shuffle', action='store_true', default=False,
             help='Mélanger les données'
             )
+    parser.add_argument(
+            '--augment', action='store_true', default=False,
+            help='Ajouter du bruit aux données (data augmentation)'
+            )
+    parser.add_argument(
+            '--noise_std', type=float, default=0.1,
+            help='Écart-type du bruit gaussien pour augmentation'
+            )
 
     # Modèle
     parser.add_argument(
             '--hidden_dim', type=int, default=256,
             help='Dimension des couches cachées'
+            )
+    parser.add_argument(
+            '--dropout', type=float, default=0.0,
+            help='Taux de dropout'
             )
 
     # Entraînement
