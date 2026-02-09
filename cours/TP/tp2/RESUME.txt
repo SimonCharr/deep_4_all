@@ -1,0 +1,128 @@
+Résultats Actuels
+Accuracy : 95.8%
+Paramètres : 159 000
+
+
+ ┌───────────────────────────────┬─────────┐
+  │           Métrique            │ Valeur  │
+  ├───────────────────────────────┼─────────┤
+  │ Meilleure Accuracy Validation │ 96.03%  │
+  ├───────────────────────────────┼─────────┤
+  │ Paramètres                    │ 159,394 │
+  └───────────────────────────────┴─────────┘
+  Progression de l'entraînement
+
+  Epoch  1 → 80.33%
+  Epoch  5 → 93.67%
+  Epoch 10 → 95.30%
+  Epoch 14 → 96.03% ← Meilleur
+
+  Performance par catégorie
+  ┌──────────────────────────────┬──────────┬─────────────────────────────┐
+  │          Catégorie           │ Accuracy │         Observation         │
+  ├──────────────────────────────┼──────────┼─────────────────────────────┤
+  │ longterm_with_amulet_hard    │ 100%     │ Parfait sur Amulette + Boss │
+  ├──────────────────────────────┼──────────┼─────────────────────────────┤
+  │ longterm_without_amulet_hard │ 98.79%   │ Très bon                    │
+  ├──────────────────────────────┼──────────┼─────────────────────────────┤
+  │ hard                         │ 95.93%   │ Bon                         │
+  ├──────────────────────────────┼──────────┼─────────────────────────────┤
+  │ normal_short                 │ 96.22%   │ Bon                         │
+  ├──────────────────────────────┼──────────┼─────────────────────────────┤
+  │ order_trap_survive_hard      │ 90.62%   │ Plus difficile              │
+  ├──────────────────────────────┼──────────┼─────────────────────────────┤
+  │ order_trap_die_hard          │ 93.33%   │ Plus difficile              │
+  └──────────────────────────────┴──────────┴─────────────────────────────┘
+  Le modèle capture très bien les dépendances long-terme (Amulette au début = 100%). Les pièges d'ordre sont un peu plus difficiles mais restent   
+  corrects.
+
+  Le Problème du Baseline
+     
+  Le modèle baseline DungeonOracle avait plusieurs problèmes :
+  ┌───────────────────────┬────────────────┬──────────────────────────────────────────┐                                                            
+  │ embed_dim = 2         │ Trop petit     │ Perd l'information sémantique des tokens │
+  ├───────────────────────┼────────────────┼──────────────────────────────────────────┤
+  │ hidden_dim = 258      │ Trop grand     │ Overfitting, modèle lourd                │
+  ├───────────────────────┼────────────────┼──────────────────────────────────────────┤
+  │ num_layers = 1        │ Insuffisant    │ Ne capture pas les patterns complexes    │
+  ├───────────────────────┼────────────────┼──────────────────────────────────────────┤
+  │ dropout = 0.0         │ Aucun          │ Overfitting garanti                      │
+  ├───────────────────────┼────────────────┼──────────────────────────────────────────┤
+  │ mode = linear         │ Pas de mémoire │ Ignore l'ORDRE des événements            │
+  ├───────────────────────┼────────────────┼──────────────────────────────────────────┤
+  │ bidirectional = False │ Sens unique    │ Manque le contexte futur                 │
+  └───────────────────────┴────────────────┴──────────────────────────────────────────┘
+  ---
+  Nos Choix et Pourquoi
+
+  1. Architecture : LSTM Bidirectionnel + Attention
+
+  Baseline: Linear (aplati tout)     →  Ignore l'ordre
+  Nous:     LSTM Bidirectionnel      →  Capture l'ordre dans les 2 sens
+
+  Pourquoi ?
+  - "Potion → Dragon" = survie, "Dragon → Potion" = mort
+  - Le LSTM lit la séquence et "se souvient" de ce qui s'est passé avant
+  - Bidirectionnel = lit aussi à l'envers (sait qu'un Dragon arrive)
+
+  2. Mécanisme d'Attention
+
+  Sans attention: Utilise seulement le dernier état
+  Avec attention: Pondère TOUS les tokens importants
+
+  Pourquoi ?
+  - L'Amulette_Protection au début protège contre le Boss à la fin
+  - L'attention permet de "regarder en arrière" sur toute la séquence
+  - Résultat : 100% sur longterm_with_amulet_hard
+
+  3. Dimensions réduites
+  ┌────────────┬──────────┬──────┬────────────────────────────────────┐
+  │ Paramètre  │ Baseline │ Nous │              Pourquoi              │
+  ├────────────┼──────────┼──────┼────────────────────────────────────┤
+  │ embed_dim  │ 2 → 258  │ 32   │ 45 tokens, 32 dimensions suffisent │
+  ├────────────┼──────────┼──────┼────────────────────────────────────┤
+  │ hidden_dim │ 258      │ 64   │ Plus compact, moins d'overfitting  │
+  └────────────┴──────────┴──────┴────────────────────────────────────┘
+  Pourquoi ?
+  - Plus petit = généralise mieux (pas de mémorisation)
+  - Le test secret a des "patterns inédits" → on veut généraliser
+
+  4. Régularisation
+  ┌────────────────┬──────────┬──────┬─────────────────────────────────────────┐
+  │   Technique    │ Baseline │ Nous │                  Effet                  │
+  ├────────────────┼──────────┼──────┼─────────────────────────────────────────┤
+  │ dropout        │ 0.0      │ 0.3  │ "Éteint" 30% des neurones aléatoirement │
+  ├────────────────┼──────────┼──────┼─────────────────────────────────────────┤
+  │ weight_decay   │ 0.0      │ 1e-4 │ Pénalise les poids trop grands          │
+  ├────────────────┼──────────┼──────┼─────────────────────────────────────────┤
+  │ early_stopping │ Non      │ Oui  │ Arrête avant l'overfitting              │
+  └────────────────┴──────────┴──────┴─────────────────────────────────────────┘
+  Pourquoi ?
+  - Le test secret contient des séquences plus longues et patterns inédits
+  - On veut un modèle qui généralise, pas qui mémorise
+
+  5. Optimiseur : Adam vs SGD
+
+  SGD:  Learning rate fixe, convergence lente
+  Adam: Adaptatif, converge plus vite et mieux
+
+  Pourquoi Adam ?
+  - Converge en 15 epochs vs potentiellement 100+ avec SGD
+  - S'adapte automatiquement à chaque paramètre
+
+  ---
+  Résumé Final
+  ┌────────────────────────────┬────────────────────────┬─────────────────────────────────────┐
+  │           Aspect           │         Choix          │               Raison                │
+  ├────────────────────────────┼────────────────────────┼─────────────────────────────────────┤
+  │ LSTM Bidirectionnel        │ Capture l'ordre        │ "Potion avant Dragon"               │
+  ├────────────────────────────┼────────────────────────┼─────────────────────────────────────┤
+  │ Attention                  │ Dépendances long-terme │ "Amulette au début → Boss à la fin" │
+  ├────────────────────────────┼────────────────────────┼─────────────────────────────────────┤
+  │ Petit modèle (159K params) │ Généralisation         │ Évite la mémorisation               │
+  ├────────────────────────────┼────────────────────────┼─────────────────────────────────────┤
+  │ Dropout 0.3                │ Régularisation         │ Robuste aux patterns inédits        │
+  ├────────────────────────────┼────────────────────────┼─────────────────────────────────────┤
+  │ Adam + Scheduler           │ Convergence rapide     │ 96% en 15 epochs                    │
+  └────────────────────────────┴────────────────────────┴─────────────────────────────────────┘
+  Le modèle est compact (650 KB) et performant (96%)
