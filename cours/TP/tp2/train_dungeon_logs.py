@@ -1,15 +1,15 @@
 """
-Script d'entraînement : Oracle du Donjon (Séquences)
+Script d'entraînement : Oracle du Donjon (Séquences) - OPTIMISÉ
 
 Ce script entraîne le modèle DungeonOracle sur le dataset des journaux de donjon.
-Il contient volontairement des pratiques non optimales à améliorer.
 
-Problèmes à corriger :
-1. Pas de padding intelligent (pack_padded_sequence)
-2. Pas d'augmentation de données
-3. Learning rate fixe (pas de scheduler)
-4. Modèle baseline utilise RNN au lieu de LSTM
-5. Embedding dimension trop petite
+Optimisations appliquées :
+1. LSTM bidirectionnel (capture contexte avant/après)
+2. Adam optimizer avec learning rate adaptatif (scheduler)
+3. Early stopping pour éviter overfitting
+4. Dropout + weight decay pour régularisation
+5. Dimensions compactes (embed=32, hidden=64) pour modèle léger
+6. Batch size 64 pour meilleure généralisation
 """
 
 import argparse
@@ -263,7 +263,7 @@ def main(args):
 
     # Modèle
     print("\nCréation du modèle...")
-    model = DungeonOracle(
+    model_kwargs = dict(
             vocab_size=train_dataset.vocab_size,
             embed_dim=args.embed_dim,
             hidden_dim=args.hidden_dim,
@@ -274,6 +274,9 @@ def main(args):
             bidirectional=args.bidirectional,
             padding_idx=train_dataset.pad_idx,
             )
+    if args.mode == 'transformer':
+        model_kwargs['nhead'] = args.nhead
+    model = DungeonOracle(**model_kwargs)
     model = model.to(device)
 
     print(f"Architecture: {args.mode}")
@@ -297,11 +300,11 @@ def main(args):
                 weight_decay=args.weight_decay
                 )
 
-    # Scheduler (optionnel)
+    # Scheduler pour adapter le learning rate
     scheduler = None
     if args.use_scheduler:
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-                optimizer, mode='max', factor=0.5, patience=5, verbose=True
+                optimizer, mode='max', factor=0.5, patience=3, min_lr=1e-6
                 )
 
     print(f"Optimiseur: {args.optimizer.upper()}, LR: {args.learning_rate}")
@@ -426,69 +429,73 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
             description="Entraînement de l'Oracle du Donjon (Séquences)"
             )
-    # Modèle
+    # Modèle - Paramètres optimisés pour un bon compromis taille/performance
     parser.add_argument(
-            '--embed_dim', type=int, default=258,
-            help='Dimension des embeddings'
+            '--embed_dim', type=int, default=32,
+            help='Dimension des embeddings (32 suffit pour ~30 tokens)'
             )
     parser.add_argument(
-            '--hidden_dim', type=int, default=258,
-            help='Dimension de l\'état caché RNN/LSTM'
+            '--hidden_dim', type=int, default=64,
+            help='Dimension de l\'état caché RNN/LSTM (compact mais efficace)'
             )
     parser.add_argument(
-            '--num_layers', type=int, default=1,
-            help='Nombre de couches RNN/LSTM'
+            '--num_layers', type=int, default=2,
+            help='Nombre de couches RNN/LSTM (2 pour patterns complexes)'
             )
     parser.add_argument(
-            '--dropout', type=float, default=0.0,
-            help='Dropout entre les couches RNN'
+            '--dropout', type=float, default=0.3,
+            help='Dropout entre les couches RNN (régularisation)'
             )
     parser.add_argument(
             '--mode',
             type=str,
-            default='linear',
-            choices=['linear', 'rnn', 'lstm'],
-            help='Architecture du modèle (default: %(default)s)')
+            default='transformer',
+            choices=['linear', 'rnn', 'lstm', 'transformer'],
+            help='Architecture du modèle - Transformer recommandé (default: %(default)s)')
     parser.add_argument(
-            '--bidirectional', action='store_true', default=False,
-            help='RNN/LSTM bidirectionnel'
+            '--nhead', type=int, default=4,
+            help='Nombre de têtes d\'attention (Transformer uniquement)'
+            )
+    parser.add_argument(
+            '--bidirectional', action='store_true', default=True,
+            help='RNN/LSTM bidirectionnel (capture contexte avant/après)'
             )
 
-    # Entraînement
+    # Entraînement - Paramètres optimisés
     parser.add_argument(
-            '--epochs', type=int, default=6,
-            help='Nombre d\'epochs'
+            '--epochs', type=int, default=50,
+            help='Nombre d\'epochs (avec early stopping, peut s\'arrêter avant)'
             )
     parser.add_argument(
-            '--batch_size', type=int, default=32,
-            help='Taille du batch'
+            '--batch_size', type=int, default=64,
+            help='Taille du batch (64 pour meilleure généralisation)'
             )
     parser.add_argument(
-            '--learning_rate', type=float, default=0.1,
-            help='Learning rate'
+            '--learning_rate', type=float, default=0.001,
+            help='Learning rate (0.001 optimal pour Adam)'
             )
     parser.add_argument(
-            '--optimizer', type=str, default='sgd',
+            '--optimizer', type=str, default='adam',
             choices=['adam', 'sgd'],
-            help='Optimiseur'
+            help='Optimiseur (Adam recommandé)'
             )
     parser.add_argument(
-            '--weight_decay', type=float, default=0.0,
-            help='Weight decay (L2 regularization)'
+            '--weight_decay', type=float, default=1e-4,
+            help='Weight decay (L2 regularization pour éviter overfitting)'
             )
     parser.add_argument(
-            '--use_scheduler', action='store_true', default=False,
-            help='Utiliser un learning rate scheduler'
+            '--use_scheduler', action='store_true', default=True,
+            help='Utiliser un learning rate scheduler (ReduceLROnPlateau)'
             )
 
-    # Early stopping
+    # Early stopping - Activé par défaut pour éviter overfitting
     parser.add_argument(
-            '--early_stopping', action='store_true', default=False,
-            help='Activer early stopping'
+            '--early_stopping', action='store_true', default=True,
+            help='Activer early stopping (recommandé)'
             )
     parser.add_argument(
-            '--patience', type=int, default=10,
-            help='Patience pour early stopping'
+            '--patience', type=int, default=7,
+            help='Patience pour early stopping (7 epochs sans amélioration)'
             )
 
     # Autres
