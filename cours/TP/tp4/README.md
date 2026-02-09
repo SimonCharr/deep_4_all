@@ -26,7 +26,7 @@ Le DAS analyse chaque phrase de la reponse du teacher et la classe :
 
 | Composant | Choix | Justification |
 |-----------|-------|---------------|
-| **Teacher** | API Infomaniak | API compatible OpenAI, supporte les logprobs |
+| **Teacher** | `openai/gpt-oss-120b` via API Infomaniak | Modele 120B performant, API compatible OpenAI, supporte les logprobs |
 | **Student** | Qwen3-4B (4-bit) | Compact, performant, tient sur un T4 (16GB VRAM) |
 | **Fine-tuning** | LoRA (rank=8) | Efficace en memoire, evite de modifier tous les poids |
 | **Framework** | Llama-Factory | Simplifie l'entrainement LoRA, supporte les templates Qwen |
