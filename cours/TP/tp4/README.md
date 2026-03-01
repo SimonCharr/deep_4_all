@@ -1,182 +1,181 @@
-# TP4 : Distillation de Modeles de Raisonnement (DASD)
+# TP4 - Distribution-Aligned Sequence Distillation (DASD)
 
-## Theme : Pokemon
-
-Distillation des capacites de raisonnement d'un LLM enseignant vers un modele etudiant compact, appliquee a l'univers Pokemon.
+**Thème** : Pokémon
+**Auteur** : Simon Charrier / JBILOU Adam
 
 ---
 
-## Contexte Scientifique
+## Objectif
 
-Les grands LLMs (GPT-4, Qwen-235B...) raisonnent bien mais sont couteux et impossibles a deployer localement. Le papier **DASD** (Distribution-Aligned Sequence Distillation) propose de transferer ces capacites vers un modele compact via :
+Implémenter la méthode DASD pour distiller les capacités de raisonnement d'un modèle "teacher" (API Infomaniak) vers un modèle "étudiant" compact (Qwen3-4B) via fine-tuning LoRA.
 
-| Technique | Role |
+---
+
+## Ressources produites
+
+| Ressource | Lien |
 |-----------|------|
-| **Temperature-Scheduled Learning** | Stage 1 (tau=0.3) pour la stabilite, Stage 2 (tau=0.9) pour la diversite |
-| **Divergence-Aware Sampling (DAS)** | Filtrer les donnees ou l'etudiant a le plus a apprendre |
-
-Le DAS analyse chaque phrase de la reponse du teacher et la classe :
-- **Teacher Sentence** (P_teacher >> P_student) : l'etudiant ignore cette connaissance → a garder
-- **Shared** (P_teacher ~ P_student) : connaissance deja acquise → neutre
-- **Student Sentence** (P_student > P_teacher) : hallucination probable → a rejeter
+| **Modèle (adapter LoRA)** | [simoncharr/pokemon-dasd-lora-adapter](https://huggingface.co/simoncharr/pokemon-dasd-lora-adapter) |
+| **Dataset** | [simoncharr/pokemon-dasd-dataset](https://huggingface.co/datasets/simoncharr/pokemon-dasd-dataset) |
+| **Notebook** | `tp4_dasd_pokemon.ipynb` |
 
 ---
 
-## Stack Technique
+## Méthodologie
 
-| Composant | Choix | Justification |
-|-----------|-------|---------------|
-| **Teacher** | `openai/gpt-oss-120b` via API Infomaniak | Modele 120B performant, API compatible OpenAI, supporte les logprobs |
-| **Student** | Qwen3-4B (4-bit) | Compact, performant, tient sur un T4 (16GB VRAM) |
-| **Fine-tuning** | LoRA (rank=8) | Efficace en memoire, evite de modifier tous les poids |
-| **Framework** | Llama-Factory | Simplifie l'entrainement LoRA, supporte les templates Qwen |
-| **Execution** | Google Colab (T4) | GPU gratuit suffisant pour le 4-bit + LoRA |
+### 1. Génération des questions (local)
 
----
+Plutôt que d'utiliser un dataset existant, nous avons généré **1000 questions Pokémon** programmatiquement à partir de templates.
 
-## Choix du theme Pokemon
+**Pourquoi ce choix ?**
+- Contrôle total sur la diversité et la qualité des questions
+- Couverture exhaustive des mécaniques Pokémon (types, STAB, stats, stratégie)
+- Évite les biais d'un dataset pré-existant
 
-Le theme Pokemon a ete choisi car il offre un domaine riche pour tester le raisonnement :
+**Implémentation :**
+- Base de données de ~200 Pokémon (Gen 1-9) avec leurs types
+- ~60 attaques avec type, puissance et catégorie
+- 9 catégories de questions avec templates paramétrables :
+  - `efficacite_types` : multiplicateurs de dégâts
+  - `stab_et_degats` : calculs STAB
+  - `stats_et_comparaisons` : analyse BST
+  - `evolution` : chaînes d'évolution
+  - `mecaniques_combat` : Rochers Furtifs, météo, etc.
+  - `strategies_specifiques` : sets compétitifs
+  - `team_building` : synergies d'équipe
+  - `formats_et_tiers` : LC, OU, VGC, etc.
+  - `calculs_avances` : formules de dégâts
 
-- **Interactions de types** : raisonnement logique avec doubles faiblesses, immunites, STAB
-- **Calculs de degats** : raisonnement mathematique avec la formule officielle
-- **Team building** : raisonnement strategique multi-etapes
-- **Chaines d'evolution** : connaissances factuelles avec conditions variees
-- **Stats et tiers** : comparaison quantitative et analyse
+### 2. Génération des réponses (API Infomaniak)
 
-Les 28 questions couvrent 5 categories pour une evaluation diversifiee.
+Les réponses sont générées via l'API Infomaniak avec le modèle `qwen3` à deux températures :
 
----
+| Stage | Température | Objectif | Exemples générés |
+|-------|-------------|----------|------------------|
+| Stage 1 | 0.3 | Stabilité, réponses cohérentes | 500 |
+| Stage 2 | 0.9 | Diversité, exploration | 500 |
 
-## Structure du TP
-
+**System prompt utilisé :**
 ```
-tp4/
-├── README.md                  # Ce fichier
-├── enonce_tp4.md              # Enonce officiel du TP
-├── simple_dasd.py             # Code de reference DAS
-└── tp4_dasd_pokemon.ipynb     # Notebook principal (tout-en-un)
-```
-
-Fichiers generes a l'execution sur Colab :
-```
-LLaMA-Factory/
-├── data/
-│   ├── pokemon_stage1.json    # Dataset Alpaca Stage 1 (apres filtrage DAS)
-│   └── pokemon_stage2.json    # Dataset Alpaca Stage 2 (apres filtrage DAS)
-├── stage1_raw.json            # Donnees brutes + logprobs Stage 1
-├── stage2_raw.json            # Donnees brutes + logprobs Stage 2
-├── stage1_train.yaml          # Config Llama-Factory Stage 1
-├── stage2_train.yaml          # Config Llama-Factory Stage 2
-├── das_analysis.png           # Visualisations DAS
-├── loss_curves.png            # Courbes de loss
-└── saves/
-    ├── pokemon-stage1/        # Adapter LoRA Stage 1
-    └── pokemon-stage2/        # Adapter LoRA Stage 2 (final)
+Tu es un expert Pokemon competitif. Pour chaque question, raisonne etape par etape
+a l'interieur de balises <reasoning>...</reasoning> avant de donner ta reponse finale.
 ```
 
----
+**Filtrage qualité :**
+- Longueur minimale (>100 caractères)
+- Présence obligatoire des balises `<reasoning>...</reasoning>`
+- Retry avec backoff exponentiel en cas d'erreur API
 
-## Pipeline (10 phases)
+### 3. Divergence-Aware Sampling (DAS)
 
-### Phase 1-2 : Setup et etude du dataset de reference
-- Installation de Llama-Factory sur Colab
-- Configuration de l'API Infomaniak via `google.colab.userdata`
-- Exploration du dataset Alibaba DASD pour comprendre le format `<think>...</think>`
+Le DAS permet d'identifier les exemples où le modèle étudiant a le plus à apprendre.
 
-### Phase 3 : Generation du dataset Pokemon
-- 28 questions hardcodees en francais, reparties en 5 categories
-- Generation a deux temperatures via l'API enseignant :
-  - **Stage 1** (tau=0.3) : reponses stables et coherentes
-  - **Stage 2** (tau=0.9) : reponses plus diversifiees et creatives
-- Logprobs recuperees et serialisees pour le DAS
-- Retry avec backoff exponentiel + filtre qualite (longueur minimale)
+**Calcul des scores :**
+1. Charger le modèle étudiant (Qwen3-4B en 4-bit)
+2. Pour chaque réponse, calculer les log-probabilités token par token
+3. Comparer avec les logprobs du teacher (fournis par l'API)
+4. Classifier chaque phrase :
+   - **Teacher Sentence** : P_teacher >> P_student (valeur pédagogique)
+   - **Shared Sentence** : P_teacher ≈ P_student (neutre)
+   - **Student Sentence** : P_student > P_teacher (bruit à rejeter)
 
-### Phase 4 : Divergence-Aware Sampling (DAS)
-- Chargement de Qwen3-4B en 4-bit (BitsAndBytesConfig)
-- Forward pass etudiant sur chaque reponse du teacher
-- Alignement phrase par phrase avec curseur caractere (adapte de `simple_dasd.py`)
-- Score par phrase : P = exp(mean(logprobs)), divergence = P_teacher - P_student
-- Filtrage : on garde les exemples a divergence moyenne >= 0
-- Visualisations : histogrammes, scatter plots P_teacher vs P_student
+**Filtrage final :** Conservation des exemples avec une densité suffisante de Teacher Sentences (divergence > 0.1).
 
-### Phase 5 : Configuration de l'entrainement
-- Enregistrement des datasets dans `dataset_info.json` (format Alpaca)
-- **Stage 1** : `lora_rank=8`, `lr=1e-4`, 5 epochs, `template=qwen3_nothink`
-- **Stage 2** : charge l'adapter Stage 1 (`adapter_name_or_path`), `lr=5e-5`, 3 epochs
-- `gradient_checkpointing=true` et `cutoff_len=2048` pour eviter les OOM
+**Pourquoi ne garder que ~60% des données ?**
 
-### Phase 6 : Entrainement
-- Liberation memoire GPU (suppression du modele etudiant charge pour le DAS)
-- `llamafactory-cli train stage1_train.yaml` puis `stage2_train.yaml`
+L'objectif du DASD n'est pas d'entraîner sur tout le dataset, mais sur les exemples les plus **pédagogiquement utiles** :
 
-### Phase 7-9 : Evaluation
-- Courbes de loss (parsing de `trainer_log.jsonl`)
-- Chargement du modele distille (base + LoRA Stage 2 via `peft`)
-- Comparaison qualitative sur 3 questions test (base vs distille)
-- Scoring automatique : presence `<reasoning>`, longueur, mots-cles Pokemon, etapes numerotees
-- Tableau recapitulatif des metriques
+| Données | % gardé | Justification |
+|---------|---------|---------------|
+| **Teacher Sentences** (divergence élevée) | 100% | Le teacher sait, l'étudiant ignore → apprentissage maximal |
+| **Shared Sentences** (divergence faible) | Partiel | Connaissances déjà acquises → peu de valeur ajoutée |
+| **Student Sentences** (divergence négative) | 0% | L'étudiant est trop confiant → risque de renforcer des erreurs |
 
-### Phase 10 : Conclusion et limites
+En filtrant les 40% de données à faible valeur pédagogique, on obtient un entraînement plus efficace : le modèle se concentre sur ce qu'il ne sait pas encore plutôt que de "réviser" des connaissances triviales ou d'apprendre du bruit.
 
----
+### 4. Entraînement (Google Colab - T4 GPU)
 
-## Choix techniques detailles
+**Configuration LoRA :**
+- `rank` : 8
+- `alpha` : 16
+- `target_modules` : q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj
 
-### Pourquoi Qwen3-4B ?
-Le modele `unsloth/Qwen3-4B-Instruct-2507-unsloth-bnb-4bit` est pre-quantifie en 4-bit, ce qui permet de le charger sur un T4 (16GB) avec de la marge pour l'entrainement LoRA. La famille Qwen3 est reconnue pour ses bonnes performances en raisonnement.
+**Stage 1 (données tau=0.3) :**
+```yaml
+dataset: pokemon_stage1
+num_train_epochs: 5
+learning_rate: 1.0e-4
+cutoff_len: 2048
+```
 
-### Pourquoi LoRA rank=8 ?
-Avec seulement 28 exemples d'entrainement, un rank eleve (16, 32) risquerait l'overfitting. Le rank 8 offre un bon compromis entre capacite d'apprentissage et regularisation implicite.
-
-### Pourquoi template qwen3_nothink ?
-Le template `qwen3_nothink` desactive le mode "thinking" natif de Qwen3 pour laisser le modele apprendre le format `<reasoning>...</reasoning>` du teacher plutot que d'utiliser son propre `<think>...</think>`.
-
-### Pourquoi deux stages de temperature ?
-Suivant le papier DASD :
-- **Stage 1 (tau=0.3)** : reponses deterministes et fiables pour ancrer les bases
-- **Stage 2 (tau=0.9)** : reponses plus variees pour enrichir la comprehension
-
-Le Stage 2 charge l'adapter LoRA du Stage 1, ce qui permet un apprentissage progressif.
-
-### Pourquoi le filtrage DAS a divergence >= 0 ?
-Un score DAS negatif signifie que l'etudiant est deja plus confiant que le teacher sur cette reponse : soit le teacher hesite, soit l'etudiant hallucine. Dans les deux cas, cet exemple n'est pas pedagogiquement utile.
+**Stage 2 (données tau=0.9) :**
+```yaml
+adapter_name_or_path: saves/pokemon-stage1  # Charge l'adapter du stage 1
+dataset: pokemon_stage2
+num_train_epochs: 3
+learning_rate: 5.0e-5  # LR réduit pour affiner
+```
 
 ---
 
-## Execution
+## Résultats
 
-### Prerequis
-- Compte Google (Colab)
-- Cle API Infomaniak stockee dans les secrets Colab sous `INFOMANIAK_API_KEY`
+### Courbes de loss
 
-### Lancement
-1. Ouvrir `tp4_dasd_pokemon.ipynb` dans Google Colab
-2. Selectionner le runtime **GPU T4**
-3. Ajouter la cle API dans les secrets Colab (icone cle dans le panneau lateral)
-4. Executer toutes les cellules sequentiellement
+![Loss curves](LLaMA-Factory/loss_curves.png) -> Voir git pour l'image
 
-### Duree estimee
-- Generation dataset (Phases 1-3) : ~15 min (depend du rate limit API)
-- DAS (Phase 4) : ~10 min
-- Entrainement Stage 1 + 2 (Phase 6) : ~20-30 min
-- Evaluation (Phases 7-9) : ~5 min
+| Stage | Loss initiale | Loss finale | Steps |
+|-------|---------------|-------------|-------|
+| Stage 1 | ~1.5 | 0.55 | 375 |
+| Stage 2 | ~0.95 | 0.82 | 225 |
+
+**Observations :**
+- **Stage 1** : Convergence régulière et stable, le modèle apprend bien les patterns de raisonnement structuré
+- **Stage 2** : Loss plus volatile (attendu avec haute température), mais tendance descendante
+
+### Analyse DAS
+
+![DAS Analysis](LLaMA-Factory/das_analysis.png) -> Voir git pour l'image
+
+**Distribution des divergences :**
+- Stage 1 (tau=0.3) : divergence moyenne ~0.35, distribution centrée
+- Stage 2 (tau=0.9) : divergence moyenne ~0.45, distribution plus étalée
+
+**Classification des phrases :**
+| Type | Stage 1 | Stage 2 |
+|------|---------|---------|
+| Teacher | ~8000 | ~14000 |
+| Shared | ~3500 | ~12000 |
+| Student | ~1000 | ~500 |
+
+**Interprétation :**
+- Le stage 2 contient plus de "Teacher Sentences", ce qui confirme que les données haute température apportent plus de diversité pédagogique
+- Très peu de "Student Sentences" (bruit), indiquant une bonne qualité des données générées
+
+### Dataset final
+
+Après filtrage DAS, **600 exemples** conservés (300 par stage) au format Alpaca.
 
 ---
 
-## Limites connues
+## Conclusions
 
-- **Taille du dataset** : 28 questions est le minimum pour un TP ; un dataset de 100+ exemples ameliorerait les resultats
-- **Alignement token** : l'alignement par curseur caractere entre tokenizers teacher/student est approximatif
-- **Evaluation** : le scoring automatique est un proxy ; une evaluation humaine serait plus fiable
-- **Overfitting** : risque reel avec un petit dataset malgre LoRA
-- **Dependance API** : la qualite des reponses depend du modele disponible sur Infomaniak
+### Ce qui a fonctionné
 
----
+1. **Génération programmatique des questions** : Permet un contrôle précis sur la diversité et évite les biais
+2. **Approche 2 stages** : Le stage 1 stabilise l'apprentissage, le stage 2 enrichit avec de la diversité
+3. **Filtrage DAS** : Élimine efficacement le bruit (Student Sentences faibles)
+4. **Format de raisonnement structuré** : Les balises `<reasoning>` forcent une réponse explicable
 
-## Ressources
+### Limitations observées
 
-- [Papier DASD](https://github.com/D2I-ai/dasd-thinking) - Distribution-Aligned Sequence Distillation
-- [Dataset de reference](https://huggingface.co/datasets/Alibaba-Apsara/Superior-Reasoning-SFT-gpt-oss-120b)
-- [Llama-Factory Documentation](https://llamafactory.readthedocs.io/en/latest/)
-- [API Infomaniak AI](https://api.infomaniak.com/2/ai/48/openai/v1)
+1. **Hallucinations du teacher** : Certaines réponses contiennent des Pokémon ou mécaniques inventés
+2. **Taille du dataset** : 600 exemples reste modeste pour un fine-tuning robuste
+3. **Évaluation quantitative** : Pas de benchmark formel (ex: GSM8K) pour mesurer l'amélioration
+
+### Améliorations possibles
+
+- Augmenter le nombre de questions (2000-5000)
+- Ajouter une étape de validation manuelle des réponses
+- Implémenter une évaluation sur un benchmark de raisonnement
+- Tester avec d'autres modèles étudiants (Llama, Mistral)
